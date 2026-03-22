@@ -1,9 +1,8 @@
 require('dotenv').config();
 const express = require('express');
-const { Pool } = require('pg');
+const mysql = require('mysql2/promise');
 const nodemailer = require('nodemailer');
 const cors = require('cors');
-const path = require('path');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -12,10 +11,13 @@ const PORT = process.env.PORT || 3000;
 app.use(cors());
 app.use(express.json());
 
-// PostgreSQL connection
-const pool = new Pool({
-  connectionString: process.env.DATABASE_URL,
-  ssl: { rejectUnauthorized: false }
+// MySQL connection pool (using Railway's connection URL)
+const pool = mysql.createPool({
+  uri: process.env.DATABASE_URL,
+  waitForConnections: true,
+  connectionLimit: 10,
+  queueLimit: 0,
+  multipleStatements: true // Allows running multiple queries at once
 });
 
 // Nodemailer transporter
@@ -30,12 +32,14 @@ const transporter = nodemailer.createTransport({
 // ─── Database Initialization ────────────────────────────────────────────────
 
 async function initDatabase() {
-  const client = await pool.connect();
+  let connection;
   try {
-    // Create tables
-    await client.query(`
+    connection = await pool.getConnection();
+    
+    // Create tables using MySQL syntax
+    await connection.query(`
       CREATE TABLE IF NOT EXISTS products (
-        id SERIAL PRIMARY KEY,
+        id INT AUTO_INCREMENT PRIMARY KEY,
         name VARCHAR(255) NOT NULL,
         price DECIMAL(10,2) NOT NULL,
         image_url TEXT,
@@ -43,7 +47,7 @@ async function initDatabase() {
       );
 
       CREATE TABLE IF NOT EXISTS orders (
-        id SERIAL PRIMARY KEY,
+        id INT AUTO_INCREMENT PRIMARY KEY,
         customer_name VARCHAR(255) NOT NULL,
         phone VARCHAR(20) NOT NULL,
         address TEXT NOT NULL,
@@ -56,16 +60,18 @@ async function initDatabase() {
       );
 
       CREATE TABLE IF NOT EXISTS order_items (
-        id SERIAL PRIMARY KEY,
-        order_id INTEGER REFERENCES orders(id),
-        product_id INTEGER REFERENCES products(id),
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        order_id INT,
+        product_id INT,
         product_name VARCHAR(255),
-        quantity INTEGER NOT NULL,
-        price DECIMAL(10,2) NOT NULL
+        quantity INT NOT NULL,
+        price DECIMAL(10,2) NOT NULL,
+        FOREIGN KEY (order_id) REFERENCES orders(id),
+        FOREIGN KEY (product_id) REFERENCES products(id)
       );
 
       CREATE TABLE IF NOT EXISTS contact_messages (
-        id SERIAL PRIMARY KEY,
+        id INT AUTO_INCREMENT PRIMARY KEY,
         name VARCHAR(255) NOT NULL,
         email VARCHAR(255) NOT NULL,
         message TEXT NOT NULL,
@@ -74,8 +80,8 @@ async function initDatabase() {
     `);
 
     // Seed products if empty
-    const result = await client.query('SELECT COUNT(*) FROM products');
-    if (parseInt(result.rows[0].count) === 0) {
+    const [rows] = await connection.query('SELECT COUNT(*) as count FROM products');
+    if (rows[0].count === 0) {
       const cars = [
         { name: "Twin Mill", price: 299, image: "/images/1.jpeg", desc: "The iconic Twin Mill with dual engines and aggressive styling. A Hot Wheels legend since 1969." },
         { name: "Bone Shaker", price: 349, image: "/images/2.jpeg", desc: "A hot rod with a skull grille that screams attitude. One of the most popular fantasy castings." },
@@ -90,19 +96,19 @@ async function initDatabase() {
       ];
 
       for (const car of cars) {
-        await client.query(
-          'INSERT INTO products (name, price, image_url, description) VALUES ($1, $2, $3, $4)',
+        await connection.query(
+          'INSERT INTO products (name, price, image_url, description) VALUES (?, ?, ?, ?)',
           [car.name, car.price, car.image, car.desc]
         );
       }
-      console.log('✅ Seeded 10 Hot Wheels products');
+      console.log('✅ Seeded 10 Hot Wheels products into MySQL');
     }
 
-    console.log('✅ Database initialized successfully');
+    console.log('✅ MySQL Database initialized successfully');
   } catch (err) {
     console.error('❌ Database initialization error:', err.message);
   } finally {
-    client.release();
+    if (connection) connection.release();
   }
 }
 
@@ -111,8 +117,8 @@ async function initDatabase() {
 // Get all products
 app.get('/api/products', async (req, res) => {
   try {
-    const result = await pool.query('SELECT * FROM products ORDER BY id');
-    res.json(result.rows);
+    const [rows] = await pool.query('SELECT * FROM products ORDER BY id');
+    res.json(rows);
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Failed to fetch products' });
@@ -121,30 +127,31 @@ app.get('/api/products', async (req, res) => {
 
 // Place an order
 app.post('/api/orders', async (req, res) => {
-  const client = await pool.connect();
+  let connection;
   try {
-    await client.query('BEGIN');
+    connection = await pool.getConnection();
+    await connection.beginTransaction();
 
     const { customerName, phone, address, city, pincode, items, total } = req.body;
 
-    // Insert order
-    const orderResult = await client.query(
+    // Insert order using MySQL prepared statement (?)
+    const [orderResult] = await connection.query(
       `INSERT INTO orders (customer_name, phone, address, city, pincode, total, payment_method)
-       VALUES ($1, $2, $3, $4, $5, $6, 'COD') RETURNING id`,
+       VALUES (?, ?, ?, ?, ?, ?, 'COD')`,
       [customerName, phone, address, city, pincode, total]
     );
-    const orderId = orderResult.rows[0].id;
+    const orderId = orderResult.insertId;
 
     // Insert order items
     for (const item of items) {
-      await client.query(
+      await connection.query(
         `INSERT INTO order_items (order_id, product_id, product_name, quantity, price)
-         VALUES ($1, $2, $3, $4, $5)`,
+         VALUES (?, ?, ?, ?, ?)`,
         [orderId, item.id, item.name, item.quantity, item.price]
       );
     }
 
-    await client.query('COMMIT');
+    await connection.commit();
 
     // Send order confirmation email to store owner
     try {
@@ -161,11 +168,11 @@ app.post('/api/orders', async (req, res) => {
 
     res.json({ success: true, orderId, message: 'Order placed successfully!' });
   } catch (err) {
-    await client.query('ROLLBACK');
+    if (connection) await connection.rollback();
     console.error(err);
     res.status(500).json({ error: 'Failed to place order' });
   } finally {
-    client.release();
+    if (connection) connection.release();
   }
 });
 
@@ -176,7 +183,7 @@ app.post('/api/contact', async (req, res) => {
 
     // Save to database
     await pool.query(
-      'INSERT INTO contact_messages (name, email, message) VALUES ($1, $2, $3)',
+      'INSERT INTO contact_messages (name, email, message) VALUES (?, ?, ?)',
       [name, email, message]
     );
 
