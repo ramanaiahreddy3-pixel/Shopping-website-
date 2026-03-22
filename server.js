@@ -11,6 +11,13 @@ const PORT = process.env.PORT || 3000;
 app.use(cors());
 app.use(express.json());
 
+// Explicitly serve individual static files from root (so .env is safe)
+const path = require('path');
+app.get('/', (req, res) => res.sendFile(path.join(__dirname, 'index.html')));
+app.get('/style.css', (req, res) => res.sendFile(path.join(__dirname, 'style.css')));
+app.get('/script.js', (req, res) => res.sendFile(path.join(__dirname, 'script.js')));
+app.use('/images', express.static(path.join(__dirname, 'images')));
+
 // MySQL connection pool (using Railway's connection URL)
 const pool = mysql.createPool({
   uri: process.env.DATABASE_URL,
