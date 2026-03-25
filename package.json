@@ -1,7 +1,7 @@
 {
-  "name": "taaruns-hotwheels",
+  "name": "kishores-hotwheels",
   "version": "1.0.0",
-  "description": "Taarun's Hotwheels - Premium Hot Wheels Shopping Store",
+  "description": "Kishore's Hotwheels - Premium Hot Wheels Shopping Store",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",

@@ -166,7 +166,7 @@ app.post('/api/orders', async (req, res) => {
       await transporter.sendMail({
         from: process.env.EMAIL_USER,
         to: process.env.EMAIL_USER,
-        subject: `🔥 New Order #${orderId} — Taarun's Hotwheels`,
+        subject: `🔥 New Order #${orderId} — Kishore's Hotwheels`,
         text: `New order received!\n\nCustomer: ${customerName}\nPhone: ${phone}\nAddress: ${address}, ${city} - ${pincode}\n\nItems:\n${itemsList}\n\nTotal: ₹${total}\nPayment: Cash on Delivery`
       });
     } catch (emailErr) {
@@ -198,7 +198,7 @@ app.post('/api/contact', async (req, res) => {
     await transporter.sendMail({
       from: process.env.EMAIL_USER,
       to: process.env.EMAIL_USER,
-      subject: `📩 New Contact Message — Taarun's Hotwheels`,
+      subject: `📩 New Contact Message — Kishore's Hotwheels`,
       text: `New message from your website!\n\nFrom: ${name}\nEmail: ${email}\n\nMessage:\n${message}`
     });
 
@@ -213,7 +213,7 @@ app.post('/api/contact', async (req, res) => {
 
 initDatabase().then(() => {
   app.listen(PORT, () => {
-    console.log(`🔥 Taarun's Hotwheels server running on http://localhost:${PORT}`);
+    console.log(`🔥 Kishore's Hotwheels server running on http://localhost:${PORT}`);
   });
 });
 
